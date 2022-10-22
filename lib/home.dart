@@ -1,4 +1,6 @@
-// ignore_for_file: unused_import
+// ignore_for_file: unused_import, non_constant_identifier_names, avoid_unnecessary_containers,
+
+import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
@@ -13,16 +15,94 @@ class Home extends StatefulWidget {
 }
 
 class _HomeState extends State<Home> {
-  MediaStream? _localStream;
+  final bool _offer = false;
   final RTCVideoRenderer _localRenderer = RTCVideoRenderer();
+  final RTCVideoRenderer _remoteRenderer = RTCVideoRenderer();
+  final TextEditingController _sdController = TextEditingController();
+
+  RTCPeerConnection? _peerConnection;
+  MediaStream? _localStream;
+
   @override
   void initState() {
-    super.initState();
     initRenderers();
+    // _createPeerConnection().then((pc) {
+    //   _peerConnection = pc;
+    // });
+    _getUsersMedia();
+    super.initState();
+  }
+
+  _createPeerConnection() async {
+    final Map<String, dynamic> configuration = {
+      'iceServers': [
+        {'url': 'stun:stun.l.google.com:19302'},
+      ]
+    };
+    final Map<String, dynamic> offerSdpConstraints = {
+      'mandatory': {
+        'OfferToReceiveAudio': true,
+        'OfferToReceiveVideo': true,
+      },
+      'optional': [],
+    };
+    _localStream = await _getUsersMedia();
+    final RTCPeerConnection pc =
+        await createPeerConnection(configuration, offerSdpConstraints);
+    pc.addStream(_localStream!);
+    pc.onIceCandidate = (e) {
+      if (e.candidate != null) {
+        debugPrint(json.encode({
+          'candidate': e.candidate.toString(),
+          'sdpMid': e.sdpMid..toString(),
+          'sdpMLineIndex': e.sdpMLineIndex..toString(),
+        }));
+      }
+    };
+    pc.onIceConnectionState = (e) {
+      debugPrint(e.toString());
+    };
+    pc.onAddStream = (stream) {
+      debugPrint('add stream: ${stream.id}');
+      _remoteRenderer.srcObject = stream;
+    };
+    return pc;
   }
 
   Future<void> initRenderers() async {
     await _localRenderer.initialize();
+    await _remoteRenderer.initialize();
+  }
+
+  @override
+  void dispose() {
+    _localRenderer.dispose();
+    _remoteRenderer.dispose();
+    _sdController.dispose();
+    super.dispose();
+  }
+
+  _getUsersMedia() async {
+    final Map<String, dynamic> mediaConstraints = {
+      'audio': true,
+      'video': {
+        'mandatory': {
+          'minWidth': '640',
+          'minHeight': '480',
+          'minFrameRate': '30',
+        },
+        'facingMode': 'user',
+        'optional': [],
+      }
+    };
+    try {
+      final MediaStream stream =
+          await navigator.mediaDevices.getUserMedia(mediaConstraints);
+
+      _localRenderer.srcObject = stream;
+    } catch (e) {
+      debugPrint(e.toString());
+    }
   }
 
   @override
@@ -48,70 +128,91 @@ class _HomeState extends State<Home> {
           ],
         ),
       ),
-      body: SizedBox(
-        width: double.infinity,
-        height: double.infinity,
+      body: Container(
         child: Column(
-          mainAxisAlignment: MainAxisAlignment.start,
-          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            SizedBox(
-              height: 200,
-              width: 200,
-              child: RTCVideoView(_localRenderer, mirror: true),
-            ),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-              children: [
-                ElevatedButton(
-                  onPressed: () async {
-                    final Map<String, dynamic> mediaConstraints = {
-                      'audio': true,
-                      'video': {
-                        'mandatory': {
-                          'minWidth': '640',
-                          'minHeight': '480',
-                          'minFrameRate': '30',
-                        },
-                        'facingMode': 'user',
-                        'optional': [],
-                      }
-                    };
-                    final MediaStream stream = await navigator.mediaDevices
-                        .getUserMedia(mediaConstraints);
-                    _localStream = stream;
-                    _localRenderer.srcObject = _localStream;
-                  },
-                  child: const Text('Active Audio and Video'),
-                ),
-                const SizedBox(
-                  width: 10,
-                ),
-                ElevatedButton(
-                  onPressed: () async {
-                    // final Map<String, dynamic> mediaConstraints = {
-                    //   'audio': true,
-                    //   'video': false,
-                    // };
-                    // final MediaStream stream = await navigator.mediaDevices
-                    //     .getUserMedia(mediaConstraints);
-                    // _localStream = stream;
-                    // _localRenderer.srcObject = _localStream;
-                  },
-                  child: const Text('Search for a partner'),
-                ),
-              ],
-            ),
-            const Center(
-              child: SizedBox(
-                height: 200,
-                width: 200,
-                child: Text("Messages Area"),
-              ),
-            )
+            VideoRenderers(),
+            OfferAndAnswerButtons(),
+            sdpCandidateTF(),
+            sdpCandidateButtons(),
           ],
         ),
       ),
+    );
+  }
+
+  Row sdpCandidateButtons() {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+      children: [
+        ElevatedButton(
+          onPressed: () {},
+          child: const Text('Set Remote Description'),
+        ),
+        ElevatedButton(
+          onPressed: () {},
+          child: const Text('Add Ice Candidate'),
+        ),
+      ],
+    );
+  }
+
+  Padding sdpCandidateTF() {
+    return Padding(
+      padding: const EdgeInsets.all(8.0),
+      child: TextField(
+        controller: _sdController,
+        keyboardType: TextInputType.multiline,
+        maxLines: 5,
+        maxLength: TextField.noMaxLength,
+        decoration: const InputDecoration(
+          hintText: 'Enter SDP Candidate',
+        ),
+      ),
+    );
+  }
+
+  SizedBox VideoRenderers() => SizedBox(
+        height: 300,
+        child: Row(
+          children: [
+            Flexible(
+              child: Container(
+                  key: const Key('local'),
+                  margin: const EdgeInsets.fromLTRB(5, 5, 5, 5),
+                  decoration: const BoxDecoration(
+                    color: Colors.black54,
+                  ),
+                  child: RTCVideoView(_localRenderer)),
+            ),
+            Flexible(
+              child: Container(
+                  key: const Key('remote'),
+                  margin: const EdgeInsets.fromLTRB(5, 5, 5, 5),
+                  decoration: const BoxDecoration(
+                    color: Colors.black54,
+                  ),
+                  child: RTCVideoView(_remoteRenderer)),
+            ),
+          ],
+        ),
+      );
+  Row OfferAndAnswerButtons() {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+      children: [
+        ElevatedButton(
+          onPressed: () async {},
+          child: const Text('Create Offer'),
+        ),
+        const SizedBox(
+          width: 10,
+        ),
+        ElevatedButton(
+          onPressed: () async {},
+          child: const Text('Create Answer'),
+        ),
+      ],
     );
   }
 }
