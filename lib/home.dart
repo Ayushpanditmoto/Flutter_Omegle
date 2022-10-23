@@ -1,11 +1,10 @@
 // ignore_for_file: unused_import, non_constant_identifier_names, avoid_unnecessary_containers,
 
-import 'dart:convert';
-
 import 'package:flutter/material.dart';
+import 'package:peerdart/peerdart.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:provider/provider.dart';
-import 'package:omegleclone/Provider/webrtc_service.dart';
+import 'package:socket_io_client/socket_io_client.dart' as io;
 
 class Home extends StatefulWidget {
   const Home({Key? key}) : super(key: key);
@@ -15,58 +14,102 @@ class Home extends StatefulWidget {
 }
 
 class _HomeState extends State<Home> {
-  final bool _offer = false;
+  bool video = true;
+  bool audio = true;
   final RTCVideoRenderer _localRenderer = RTCVideoRenderer();
   final RTCVideoRenderer _remoteRenderer = RTCVideoRenderer();
   final TextEditingController _sdController = TextEditingController();
+  final Peer peer = Peer();
+  final io.Socket _socket = io.io('http://10.0.2.2:3000', <String, dynamic>{
+    'transports': ['websocket'],
+  });
 
-  RTCPeerConnection? _peerConnection;
-  MediaStream? _localStream;
-
+  String? theUUID;
+  String? peerConnection;
+  String? localStream;
+  String? otherUser;
+  String? theStream;
+  String? peerID;
+  String? otherPeerID;
+  bool joined = false;
+  bool waitingOnConnection = false;
+  int onlineUsers = 0;
   @override
   void initState() {
     initRenderers();
-    // _createPeerConnection().then((pc) {
-    //   _peerConnection = pc;
-    // });
-    _getUsersMedia();
+    connectSocekt();
+    // generate peer id and print in console
+    peer.on("open").listen((id) {
+      setState(() {
+        peerID = peer.id;
+        debugPrint('peerID: $peerID');
+      });
+    });
+    _getUsersMedia(audio, video);
     super.initState();
   }
 
-  _createPeerConnection() async {
-    final Map<String, dynamic> configuration = {
-      'iceServers': [
-        {'url': 'stun:stun.l.google.com:19302'},
-      ]
-    };
-    final Map<String, dynamic> offerSdpConstraints = {
-      'mandatory': {
-        'OfferToReceiveAudio': true,
-        'OfferToReceiveVideo': true,
-      },
-      'optional': [],
-    };
-    _localStream = await _getUsersMedia();
-    final RTCPeerConnection pc =
-        await createPeerConnection(configuration, offerSdpConstraints);
-    pc.addStream(_localStream!);
-    pc.onIceCandidate = (e) {
-      if (e.candidate != null) {
-        debugPrint(json.encode({
-          'candidate': e.candidate.toString(),
-          'sdpMid': e.sdpMid..toString(),
-          'sdpMLineIndex': e.sdpMLineIndex..toString(),
-        }));
-      }
-    };
-    pc.onIceConnectionState = (e) {
-      debugPrint(e.toString());
-    };
-    pc.onAddStream = (stream) {
-      debugPrint('add stream: ${stream.id}');
-      _remoteRenderer.srcObject = stream;
-    };
-    return pc;
+  connectSocekt() {
+    //online users count
+    _socket.on('oc', (oc) {
+      setState(() {
+        debugPrint('online users: $oc');
+        debugPrint('Socket connected');
+
+        onlineUsers = oc;
+      });
+    });
+    _socket.on('connect', (data) {
+      _getUsersMedia(audio, video);
+      _socket.emit('join', peerID);
+    });
+  }
+
+  joinRoom() {
+    try {
+      ServerMsg("Searching for a user...");
+      waitingOnConnection = true;
+      joined = false;
+      _socket.emit('join room', [peerID, video]);
+      peer.on<MediaConnection>('call').listen((call) async {
+        final mediaStream = await navigator.mediaDevices
+            .getUserMedia({"video": true, "audio": false});
+        call.answer(mediaStream);
+        call.on('stream').listen((stream) {
+          joined = true;
+          _remoteRenderer.srcObject = stream;
+        });
+        call.on("close").listen((event) {
+          setState(() {
+            waitingOnConnection = false;
+            joined = false;
+          });
+        });
+      });
+    } catch (e) {
+      debugPrint('joinRoom error: $e');
+    }
+  }
+
+  ServerMsg(String msg) {
+    debugPrint(msg);
+  }
+
+  StrangerMsg(String msg) {
+    debugPrint(msg);
+  }
+
+  sendMessage() {
+    if (joined) {
+      _socket.emit('message', 'Hello');
+    } else if (waitingOnConnection) {
+      _socket.emit('message', 'Waiting for strangers');
+    } else if (!joined) {
+      _socket.emit(
+          'message', 'You havent joined a Room yet! Please click on search');
+    } else {
+      _socket.emit('message', 'you cannot sent a blank message');
+    }
   }
 
   Future<void> initRenderers() async {
@@ -82,19 +125,8 @@ class _HomeState extends State<Home> {
     super.dispose();
   }
 
-  _getUsersMedia() async {
-    final Map<String, dynamic> mediaConstraints = {
-      'audio': true,
-      'video': {
-        'mandatory': {
-          'minWidth': '640',
-          'minHeight': '480',
-          'minFrameRate': '30',
-        },
-        'facingMode': 'user',
-        'optional': [],
-      }
-    };
+  _getUsersMedia(bool x, bool y) async {
+    final Map<String, dynamic> mediaConstraints = {'audio': x, 'video': y};
     try {
       final MediaStream stream =
           await navigator.mediaDevices.getUserMedia(mediaConstraints);
@@ -110,6 +142,13 @@ class _HomeState extends State<Home> {
     return Scaffold(
       appBar: AppBar(
         title: const Text('Omegle Clone'),
+        actions: [
+          Text(
+            '$onlineUsers',
+            style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w700),
+          ),
+          const Icon(Icons.person)
+        ],
       ),
       bottomNavigationBar: Container(
         height: 50,
@@ -132,61 +171,70 @@ class _HomeState extends State<Home> {
         child: Column(
           children: [
             VideoRenderers(),
-            OfferAndAnswerButtons(),
-            sdpCandidateTF(),
-            sdpCandidateButtons(),
+            const SizedBox(height: 5),
+            ButtonSection(),
+            const SizedBox(height: 5),
           ],
         ),
       ),
     );
   }
 
-  Row sdpCandidateButtons() {
+  Row ButtonSection() {
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceEvenly,
       children: [
         ElevatedButton(
-          onPressed: () {},
-          child: const Text('Set Remote Description'),
+          onPressed: () {
+            setState(() {
+              video = !video;
+              _getUsersMedia(audio, video);
+            });
+          },
+          child: const Text('Camera'),
         ),
         ElevatedButton(
-          onPressed: () {},
-          child: const Text('Add Ice Candidate'),
+          onPressed: () {
+            setState(() {
+              audio = !audio;
+              _getUsersMedia(audio, video);
+            });
+          },
+          child: const Text('Microphone'),
+        ),
+        ElevatedButton(
+          onPressed: () {
+            joinRoom();
+          },
+          child: const Text('Search for Partner'),
         ),
       ],
     );
   }
 
-  Padding sdpCandidateTF() {
-    return Padding(
-      padding: const EdgeInsets.all(8.0),
-      child: TextField(
-        controller: _sdController,
-        keyboardType: TextInputType.multiline,
-        maxLines: 5,
-        maxLength: TextField.noMaxLength,
-        decoration: const InputDecoration(
-          hintText: 'Enter SDP Candidate',
-        ),
-      ),
-    );
-  }
-
   SizedBox VideoRenderers() => SizedBox(
-        height: 300,
+        height: 260,
         child: Row(
           children: [
             Flexible(
+              flex: 1,
+              fit: FlexFit.tight,
               child: Container(
+                  height: 260,
                   key: const Key('local'),
                   margin: const EdgeInsets.fromLTRB(5, 5, 5, 5),
                   decoration: const BoxDecoration(
                     color: Colors.black54,
                   ),
-                  child: RTCVideoView(_localRenderer)),
+                  child: video
+                      ? RTCVideoView(_localRenderer, mirror: true)
+                      : const Center(child: Text('No Video'))),
             ),
             Flexible(
+              flex: 1,
+              fit: FlexFit.tight,
               child: Container(
+                  height: 260,
                   key: const Key('remote'),
                   margin: const EdgeInsets.fromLTRB(5, 5, 5, 5),
                   decoration: const BoxDecoration(
@@ -197,22 +245,4 @@ class _HomeState extends State<Home> {
           ],
         ),
       );
-  Row OfferAndAnswerButtons() {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-      children: [
-        ElevatedButton(
-          onPressed: () async {},
-          child: const Text('Create Offer'),
-        ),
-        const SizedBox(
-          width: 10,
-        ),
-        ElevatedButton(
-          onPressed: () async {},
-          child: const Text('Create Answer'),
-        ),
-      ],
-    );
-  }
 }

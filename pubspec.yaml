@@ -33,7 +33,7 @@ dependencies:
   flutter:
     sdk: flutter
   flutter_webrtc: ^0.9.11
-  # flutter_webrtc_wrapper: ^1.0.1
+  peerdart: ^0.3.2
   provider: ^6.0.4
   socket_io_client: ^2.0.0
 
