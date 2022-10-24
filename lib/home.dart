@@ -3,7 +3,6 @@
 import 'package:flutter/material.dart';
 import 'package:peerdart/peerdart.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
-import 'package:provider/provider.dart';
 import 'package:socket_io_client/socket_io_client.dart' as io;
 
 class Home extends StatefulWidget {
@@ -14,11 +13,14 @@ class Home extends StatefulWidget {
 }
 
 class _HomeState extends State<Home> {
+  //Icon for the button change conditionally
   bool video = true;
   bool audio = true;
+  bool socketStatus = false;
+  String UserConnectionMsg = "Not Connected";
   final RTCVideoRenderer _localRenderer = RTCVideoRenderer();
   final RTCVideoRenderer _remoteRenderer = RTCVideoRenderer();
-  final TextEditingController _sdController = TextEditingController();
+  final TextEditingController _msgController = TextEditingController();
   final Peer peer = Peer();
   final io.Socket _socket =
       io.io('https://socketomegle.herokuapp.com', <String, dynamic>{
@@ -27,7 +29,6 @@ class _HomeState extends State<Home> {
 
   String? theUUID;
   String? peerConnection;
-  String? localStream;
   String? otherUser;
   String? theStream;
   String? peerID;
@@ -38,7 +39,6 @@ class _HomeState extends State<Home> {
   @override
   void initState() {
     super.initState();
-
     initRenderers();
     peer.on("open").listen((id) {
       setState(() {
@@ -72,6 +72,7 @@ class _HomeState extends State<Home> {
   connectSocekt() {
     _socket.on('oc', (oc) {
       setState(() {
+        socketStatus = true;
         debugPrint('online users: $oc');
         debugPrint('Socket connected');
 
@@ -83,15 +84,28 @@ class _HomeState extends State<Home> {
       _socket.emit('join', peerID);
     });
     _socket.on('disconnect', (data) {
+      socketStatus = false;
       debugPrint('Socket disconnected');
     });
+  }
+
+  serverMsg(msg) {
+    debugPrint('server msg: $msg');
+  }
+
+  strangerMsg(msg) {
+    debugPrint('stranger msg: $msg');
   }
 
   joinRoom() {
     try {
       ServerMsg("Searching for a user...");
-      waitingOnConnection = true;
-      joined = false;
+      setState(() {
+        waitingOnConnection = true;
+        UserConnectionMsg = "Searching for a user...";
+        joined = false;
+      });
+
       _socket.emit('join room', peerID);
     } catch (e) {
       debugPrint('joinRoom error: $e');
@@ -129,7 +143,7 @@ class _HomeState extends State<Home> {
     peer.dispose();
     _localRenderer.dispose();
     _remoteRenderer.dispose();
-    _sdController.dispose();
+    _msgController.dispose();
     super.dispose();
   }
 
@@ -149,13 +163,32 @@ class _HomeState extends State<Home> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
+        toolbarTextStyle: const TextStyle(color: Colors.black),
         title: const Text('Omegle Clone'),
         actions: [
-          Text(
-            '$onlineUsers',
-            style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w700),
+          Center(
+            child: Text(
+              '$onlineUsers',
+              style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w700),
+            ),
           ),
-          const Icon(Icons.person)
+          InkWell(
+            onTap: () async {
+              await connectSocekt();
+            },
+            child: socketStatus
+                ? const Icon(
+                    Icons.circle,
+                    color: Colors.green,
+                  )
+                : const Icon(
+                    Icons.circle,
+                    color: Colors.red,
+                  ),
+          ),
+          const SizedBox(
+            width: 10,
+          )
         ],
       ),
       bottomNavigationBar: Container(
@@ -171,7 +204,7 @@ class _HomeState extends State<Home> {
                 ),
               ),
             ),
-            Icon(Icons.send),
+            IconButton(onPressed: null, icon: Icon(Icons.send)),
           ],
         ),
       ),
@@ -179,10 +212,30 @@ class _HomeState extends State<Home> {
         child: Column(
           children: [
             VideoRenderers(),
-            const SizedBox(height: 5),
             ButtonSection(),
-            const SizedBox(height: 5),
+            UserJoinStatus(),
           ],
+        ),
+      ),
+    );
+  }
+
+  UserJoinStatus() {
+    return Container(
+      width: double.infinity,
+      height: 25,
+      decoration: const BoxDecoration(
+        color: Colors.black38,
+      ),
+      child: Align(
+        alignment: Alignment.center,
+        child: Text(
+          joined ? 'Stranger Joined' : UserConnectionMsg,
+          style: TextStyle(
+            color: joined ? Colors.green : Colors.red,
+            fontSize: 15,
+            fontWeight: FontWeight.w700,
+          ),
         ),
       ),
     );
@@ -192,29 +245,50 @@ class _HomeState extends State<Home> {
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceEvenly,
       children: [
-        ElevatedButton(
+        IconButton(
           onPressed: () {
             setState(() {
               video = !video;
-              _getUsersMedia(audio, video);
             });
+            _getUsersMedia(audio, video);
           },
-          child: const Text('Camera'),
+          icon: Icon(
+            video ? Icons.videocam : Icons.videocam_off,
+            color: video ? Colors.blue : Colors.grey,
+          ),
         ),
-        ElevatedButton(
+        Container(
+          height: 40,
+          width: 1,
+          color: Colors.black,
+        ),
+        IconButton(
           onPressed: () {
             setState(() {
               audio = !audio;
-              _getUsersMedia(audio, video);
             });
+            _getUsersMedia(audio, video);
           },
-          child: const Text('Microphone'),
+          icon: Icon(
+            audio ? Icons.mic : Icons.mic_off,
+            color: audio ? Colors.blue : Colors.grey,
+          ),
+        ),
+        Container(
+          height: 40,
+          width: 1,
+          color: Colors.black,
         ),
         ElevatedButton(
           onPressed: () async {
             await joinRoom();
           },
-          child: const Text('Search for Partner'),
+          style: ElevatedButton.styleFrom(
+            elevation: 0,
+            shape: const StadiumBorder(),
+          ),
+          child: const Text('Search for Partner',
+              style: TextStyle(color: Colors.white)),
         ),
       ],
     );
