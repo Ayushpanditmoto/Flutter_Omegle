@@ -20,7 +20,8 @@ class _HomeState extends State<Home> {
   final RTCVideoRenderer _remoteRenderer = RTCVideoRenderer();
   final TextEditingController _sdController = TextEditingController();
   final Peer peer = Peer();
-  final io.Socket _socket = io.io('http://10.0.2.2:3000', <String, dynamic>{
+  final io.Socket _socket =
+      io.io('https://socketomegle.herokuapp.com', <String, dynamic>{
     'transports': ['websocket'],
   });
 
@@ -36,21 +37,39 @@ class _HomeState extends State<Home> {
   int onlineUsers = 0;
   @override
   void initState() {
+    super.initState();
+
     initRenderers();
-    connectSocekt();
-    // generate peer id and print in console
     peer.on("open").listen((id) {
       setState(() {
         peerID = peer.id;
         debugPrint('peerID: $peerID');
       });
     });
+    peer.on<MediaConnection>('call').listen((call) async {
+      final mediaStream = await navigator.mediaDevices
+          .getUserMedia({"video": true, "audio": true});
+      call.answer(mediaStream);
+      call.on('stream').listen((stream) {
+        joined = true;
+        setState(() {
+          _localRenderer.srcObject = mediaStream;
+          _remoteRenderer.srcObject = stream;
+        });
+      });
+      call.on("close").listen((event) {
+        setState(() {
+          waitingOnConnection = false;
+          joined = false;
+          _localRenderer.srcObject = null;
+        });
+      });
+    });
     _getUsersMedia(audio, video);
-    super.initState();
+    connectSocekt();
   }
 
   connectSocekt() {
-    //online users count
     _socket.on('oc', (oc) {
       setState(() {
         debugPrint('online users: $oc');
@@ -63,6 +82,9 @@ class _HomeState extends State<Home> {
       _getUsersMedia(audio, video);
       _socket.emit('join', peerID);
     });
+    _socket.on('disconnect', (data) {
+      debugPrint('Socket disconnected');
+    });
   }
 
   joinRoom() {
@@ -70,22 +92,7 @@ class _HomeState extends State<Home> {
       ServerMsg("Searching for a user...");
       waitingOnConnection = true;
       joined = false;
-      _socket.emit('join room', [peerID, video]);
-      peer.on<MediaConnection>('call').listen((call) async {
-        final mediaStream = await navigator.mediaDevices
-            .getUserMedia({"video": true, "audio": false});
-        call.answer(mediaStream);
-        call.on('stream').listen((stream) {
-          joined = true;
-          _remoteRenderer.srcObject = stream;
-        });
-        call.on("close").listen((event) {
-          setState(() {
-            waitingOnConnection = false;
-            joined = false;
-          });
-        });
-      });
+      _socket.emit('join room', peerID);
     } catch (e) {
       debugPrint('joinRoom error: $e');
     }
@@ -119,6 +126,7 @@ class _HomeState extends State<Home> {
 
   @override
   void dispose() {
+    peer.dispose();
     _localRenderer.dispose();
     _remoteRenderer.dispose();
     _sdController.dispose();
@@ -203,8 +211,8 @@ class _HomeState extends State<Home> {
           child: const Text('Microphone'),
         ),
         ElevatedButton(
-          onPressed: () {
-            joinRoom();
+          onPressed: () async {
+            await joinRoom();
           },
           child: const Text('Search for Partner'),
         ),
