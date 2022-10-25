@@ -18,24 +18,26 @@ class _HomeState extends State<Home> {
   bool audio = true;
   bool socketStatus = false;
   String UserConnectionMsg = "Not Connected";
-  final RTCVideoRenderer _localRenderer = RTCVideoRenderer();
-  final RTCVideoRenderer _remoteRenderer = RTCVideoRenderer();
-  final TextEditingController _msgController = TextEditingController();
-  final Peer peer = Peer();
-  final io.Socket _socket =
-      io.io('https://socketomegle.herokuapp.com', <String, dynamic>{
-    'transports': ['websocket'],
-  });
+  io.Socket? socket;
 
-  String? theUUID;
-  String? peerConnection;
-  String? otherUser;
-  String? theStream;
+//Peerdart copied code
+  final TextEditingController _msgController = TextEditingController();
+  final Peer peer = Peer(options: PeerOptions(debug: LogLevel.All));
+  final _localRenderer = RTCVideoRenderer();
+  final _remoteRenderer = RTCVideoRenderer();
+  bool inCall = false;
   String? peerID;
+  //END
+
+  String? otherUser;
+  MediaStream? theStream;
   String? otherPeerID;
+
   bool joined = false;
   bool waitingOnConnection = false;
+  late bool videoOn;
   int onlineUsers = 0;
+
   @override
   void initState() {
     super.initState();
@@ -46,31 +48,46 @@ class _HomeState extends State<Home> {
         debugPrint('peerID: $peerID');
       });
     });
-    peer.on<MediaConnection>('call').listen((call) async {
+    connectSocekt();
+    _getUsersMedia(audio, video);
+
+    //Peerdart copied code
+    peer.on<MediaConnection>("call").listen((call) async {
       final mediaStream = await navigator.mediaDevices
-          .getUserMedia({"video": true, "audio": true});
+          .getUserMedia({"video": true, "audio": false});
+
       call.answer(mediaStream);
-      call.on('stream').listen((stream) {
-        joined = true;
-        setState(() {
-          _localRenderer.srcObject = mediaStream;
-          _remoteRenderer.srcObject = stream;
-        });
-      });
+
       call.on("close").listen((event) {
         setState(() {
-          waitingOnConnection = false;
-          joined = false;
-          _localRenderer.srcObject = null;
+          inCall = false;
+        });
+      });
+
+      call.on<MediaStream>("stream").listen((event) {
+        _localRenderer.srcObject = mediaStream;
+        _remoteRenderer.srcObject = event;
+
+        setState(() {
+          inCall = true;
         });
       });
     });
-    _getUsersMedia(audio, video);
-    connectSocekt();
+    //END
+  }
+
+  Future<void> initRenderers() async {
+    await _localRenderer.initialize();
+    await _remoteRenderer.initialize();
   }
 
   connectSocekt() {
-    _socket.on('oc', (oc) {
+    socket = io.io('https://socketomegle.herokuapp.com', <String, dynamic>{
+      'transports': ['websocket'],
+      'autoConnect': false,
+    });
+    socket!.connect();
+    socket!.on('oc', (oc) {
       setState(() {
         socketStatus = true;
         debugPrint('online users: $oc');
@@ -79,72 +96,77 @@ class _HomeState extends State<Home> {
         onlineUsers = oc;
       });
     });
-    _socket.on('connect', (data) {
+    //Submit sent message
+    socket!.on('connect', (data) {
+      setState(() {
+        debugPrint('Socket connected $data');
+        socketStatus = true;
+        UserConnectionMsg = "Connected ${socket!.id} $peerID";
+      });
       _getUsersMedia(audio, video);
-      _socket.emit('join', peerID);
+      socket!.emit('join', peerID);
     });
-    _socket.on('disconnect', (data) {
-      socketStatus = false;
-      debugPrint('Socket disconnected');
+
+    socket!.on('dc', (msg) {
+      setState(() {
+        debugPrint('Socket disconnected $msg');
+        _remoteRenderer.srcObject = null;
+        socketStatus = false;
+        joined = false;
+        UserConnectionMsg = "Disconnected";
+      });
+    });
+    socket!.on('other peer', (pid) {
+      setState(() {
+        otherPeerID = pid;
+        debugPrint('otherPeerID: $otherPeerID');
+      });
+    });
+    socket!.on('joined', (msg) {
+      setState(() {
+        debugPrint('joined: $msg');
+        joined = true;
+        UserConnectionMsg = "Connected";
+      });
     });
   }
 
-  serverMsg(msg) {
-    debugPrint('server msg: $msg');
-  }
-
-  strangerMsg(msg) {
-    debugPrint('stranger msg: $msg');
+  connectToNewUser(pid, stream) {
+    debugPrint('connectToNewUser: $pid Stream: $stream');
+    final call = peer.call(pid, stream);
+    call.on('stream').listen((remoteStream) {
+      _remoteRenderer.srcObject = remoteStream;
+    });
   }
 
   joinRoom() {
     try {
-      ServerMsg("Searching for a user...");
       setState(() {
         waitingOnConnection = true;
         UserConnectionMsg = "Searching for a user...";
         joined = false;
       });
 
-      _socket.emit('join room', peerID);
+      socket!.emit('join room', ({peerID, video}));
+      debugPrint('join room: $peerID $video');
+      setState(() {
+        waitingOnConnection = true;
+        joined = false;
+        _remoteRenderer.srcObject = null;
+      });
+      peer.on('call').listen((call) {
+        call.answer(_localRenderer.srcObject);
+        call.on('stream').listen((stream) {
+          setState(() {
+            _remoteRenderer.srcObject = stream;
+            waitingOnConnection = false;
+            joined = true;
+          });
+        });
+      });
     } catch (e) {
-      debugPrint('joinRoom error: $e');
+      debugPrint('join Room: $e');
     }
-  }
-
-  ServerMsg(String msg) {
-    debugPrint(msg);
-  }
-
-  StrangerMsg(String msg) {
-    debugPrint(msg);
-  }
-
-  sendMessage() {
-    if (joined) {
-      _socket.emit('message', 'Hello');
-    } else if (waitingOnConnection) {
-      _socket.emit('message', 'Waiting for strangers');
-    } else if (!joined) {
-      _socket.emit(
-          'message', 'You havent joined a Room yet! Please click on search');
-    } else {
-      _socket.emit('message', 'you cannot sent a blank message');
-    }
-  }
-
-  Future<void> initRenderers() async {
-    await _localRenderer.initialize();
-    await _remoteRenderer.initialize();
-  }
-
-  @override
-  void dispose() {
-    peer.dispose();
-    _localRenderer.dispose();
-    _remoteRenderer.dispose();
-    _msgController.dispose();
-    super.dispose();
   }
 
   _getUsersMedia(bool x, bool y) async {
@@ -159,8 +181,72 @@ class _HomeState extends State<Home> {
     }
   }
 
+  serverMsg(msg) {
+    return Container(
+      padding: const EdgeInsets.all(10),
+      margin: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: const Color.fromARGB(255, 255, 255, 255),
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Text(
+        "Server : $msg",
+        style: const TextStyle(color: Color.fromARGB(255, 0, 0, 0)),
+      ),
+    );
+  }
+
+  strangerMsg(msg) {
+    return Container(
+      padding: const EdgeInsets.all(10),
+      margin: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: Colors.blueGrey,
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Text(
+        "stranger : $msg",
+        style: const TextStyle(color: Color.fromARGB(255, 255, 255, 255)),
+      ),
+    );
+  }
+
+  @override
+  void dispose() {
+    peer.dispose();
+    _msgController.dispose();
+    _localRenderer.dispose();
+    _remoteRenderer.dispose();
+    super.dispose();
+  }
+
+  void connect() async {
+    final mediaStream = await navigator.mediaDevices
+        .getUserMedia({"video": true, "audio": false});
+
+    final conn = peer.call(_msgController.text, mediaStream);
+
+    conn.on("close").listen((event) {
+      setState(() {
+        inCall = false;
+      });
+    });
+
+    conn.on<MediaStream>("stream").listen((event) {
+      _remoteRenderer.srcObject = event;
+      _localRenderer.srcObject = mediaStream;
+
+      setState(() {
+        inCall = true;
+      });
+    });
+
+    // });
+  }
+
   @override
   Widget build(BuildContext context) {
+    debugPrint('build');
     return Scaffold(
       appBar: AppBar(
         toolbarTextStyle: const TextStyle(color: Colors.black),
@@ -191,31 +277,65 @@ class _HomeState extends State<Home> {
           )
         ],
       ),
-      bottomNavigationBar: Container(
-        height: 50,
-        color: const Color.fromARGB(255, 211, 211, 211),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: const [
-            Expanded(
-              child: TextField(
-                decoration: InputDecoration(
-                  hintText: 'Enter Messages',
-                ),
-              ),
-            ),
-            IconButton(onPressed: null, icon: Icon(Icons.send)),
-          ],
-        ),
-      ),
-      body: Container(
+      // bottomNavigationBar: Container(
+      //   height: 50,
+      //   color: const Color.fromARGB(255, 211, 211, 211),
+      //   child: Row(
+      //     mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      //     children: const [
+      //       Expanded(
+      //         child: TextField(
+      //           decoration: InputDecoration(
+      //             hintText: 'Enter Messages',
+      //           ),
+      //         ),
+      //       ),
+      //       IconButton(onPressed: null, icon: Icon(Icons.send)),
+      //     ],
+      //   ),
+      // ),
+
+      body: SizedBox(
+        height: MediaQuery.of(context).size.height,
+        width: MediaQuery.of(context).size.width,
         child: Column(
+          mainAxisAlignment: MainAxisAlignment.start,
           children: [
             VideoRenderers(),
             ButtonSection(),
             UserJoinStatus(),
+            MessageSection(),
+            MessageArea(),
           ],
         ),
+      ),
+    );
+  }
+
+  MessageSection() {
+    return Expanded(
+        child: Container(
+      child: SelectableText(peerID ?? ""),
+    ));
+  }
+
+  MessageArea() {
+    return Container(
+      height: 50,
+      color: const Color.fromARGB(255, 211, 211, 211),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Expanded(
+            child: TextField(
+              controller: _msgController,
+              decoration: const InputDecoration(
+                hintText: 'Enter Messages',
+              ),
+            ),
+          ),
+          IconButton(onPressed: connect, icon: const Icon(Icons.send)),
+        ],
       ),
     );
   }
@@ -223,7 +343,7 @@ class _HomeState extends State<Home> {
   UserJoinStatus() {
     return Container(
       width: double.infinity,
-      height: 25,
+      height: 50,
       decoration: const BoxDecoration(
         color: Colors.black38,
       ),
