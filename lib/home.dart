@@ -82,7 +82,7 @@ class _HomeState extends State<Home> {
   }
 
   connectSocekt() {
-    socket = io.io('https://socketomegle.herokuapp.com', <String, dynamic>{
+    socket = io.io('https://omegleclone.onrender.com', <String, dynamic>{
       'transports': ['websocket'],
       'autoConnect': false,
     });
