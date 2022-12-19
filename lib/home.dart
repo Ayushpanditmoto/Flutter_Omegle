@@ -82,6 +82,7 @@ class _HomeState extends State<Home> {
   }
 
   connectSocekt() {
+    debugPrint("Connecting to socket");
     socket = io.io('https://omegleclone.onrender.com', <String, dynamic>{
       'transports': ['websocket'],
       'autoConnect': false,
@@ -106,7 +107,7 @@ class _HomeState extends State<Home> {
       _getUsersMedia(audio, video);
       socket!.emit('join', peerID);
     });
-
+//done and working
     socket!.on('dc', (msg) {
       setState(() {
         debugPrint('Socket disconnected $msg');
@@ -116,15 +117,24 @@ class _HomeState extends State<Home> {
         UserConnectionMsg = "Disconnected";
       });
     });
+
+    //done and working
     socket!.on('other peer', (pid) {
       setState(() {
         otherPeerID = pid;
         debugPrint('otherPeerID: $otherPeerID');
       });
     });
-    socket!.on('joined', (msg) {
+    socket!.on('user joined', (msg) {
       setState(() {
-        debugPrint('joined: $msg');
+        socketStatus = true;
+        // otherPeerID = pid;
+        debugPrint('joined1: $msg $peerID');
+        // debugPrint(msg.runtimeType.toString());
+        print(msg[0]);
+        print(msg[1]);
+        print(msg[2]);
+        connect(msg[1]);
         joined = true;
         UserConnectionMsg = "Connected";
       });
@@ -161,6 +171,7 @@ class _HomeState extends State<Home> {
             _remoteRenderer.srcObject = stream;
             waitingOnConnection = false;
             joined = true;
+            UserConnectionMsg = "Connected";
           });
         });
       });
@@ -217,14 +228,16 @@ class _HomeState extends State<Home> {
     _msgController.dispose();
     _localRenderer.dispose();
     _remoteRenderer.dispose();
+    socket!.disconnect();
     super.dispose();
   }
 
-  void connect() async {
+  void connect(String peerid) async {
     final mediaStream = await navigator.mediaDevices
         .getUserMedia({"video": true, "audio": false});
 
-    final conn = peer.call(_msgController.text, mediaStream);
+    // final conn = peer.call(_msgController.text, mediaStream);
+    final conn = peer.call(peerid, mediaStream);
 
     conn.on("close").listen((event) {
       setState(() {
@@ -314,8 +327,15 @@ class _HomeState extends State<Home> {
 
   MessageSection() {
     return Expanded(
-        child: Container(
-      child: SelectableText(peerID ?? ""),
+        child: Column(
+      children: [
+        Container(
+          child: SelectableText(peerID ?? ""),
+        ),
+        Text(UserConnectionMsg),
+        Text(socketStatus ? "Socket Connected" : "Socket Disconnected"),
+        Text(joined ? "Joined" : "Not Joined"),
+      ],
     ));
   }
 
@@ -334,7 +354,8 @@ class _HomeState extends State<Home> {
               ),
             ),
           ),
-          IconButton(onPressed: connect, icon: const Icon(Icons.send)),
+          // IconButton(onPressed: connect, icon: const Icon(Icons.send)),
+          IconButton(onPressed: () {}, icon: const Icon(Icons.send)),
         ],
       ),
     );
