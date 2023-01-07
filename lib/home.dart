@@ -1,9 +1,9 @@
-// ignore_for_file: unused_import, non_constant_identifier_names, avoid_unnecessary_containers,
+// ignore_for_file: unused_import, non_constant_identifier_names, avoid_unnecessary_containers,, library_prefixes
 
 import 'package:flutter/material.dart';
 import 'package:peerdart/peerdart.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
-import 'package:socket_io_client/socket_io_client.dart' as io;
+import 'package:socket_io_client/socket_io_client.dart' as Io;
 
 class Home extends StatefulWidget {
   const Home({Key? key}) : super(key: key);
@@ -18,7 +18,7 @@ class _HomeState extends State<Home> {
   bool audio = true;
   bool socketStatus = false;
   String UserConnectionMsg = "Not Connected";
-  io.Socket? socket;
+  Io.Socket? socket;
 
 //Peerdart copied code
   final TextEditingController _msgController = TextEditingController();
@@ -83,17 +83,22 @@ class _HomeState extends State<Home> {
 
   connectSocekt() {
     debugPrint("Connecting to socket");
-    socket = io.io('https://omegleclone.onrender.com', <String, dynamic>{
+    socket = Io.io('https://omegleclone.onrender.com', <String, dynamic>{
       'transports': ['websocket'],
       'autoConnect': false,
     });
+    // socket = Io.io('http://192.168.29.182:9090', <String, dynamic>{
+    //   'transports': ['websocket'],
+    //   'autoConnect': false,
+    // });
+
     socket!.connect();
+    //done and working
     socket!.on('oc', (oc) {
       setState(() {
         socketStatus = true;
         debugPrint('online users: $oc');
         debugPrint('Socket connected');
-
         onlineUsers = oc;
       });
     });
@@ -112,7 +117,6 @@ class _HomeState extends State<Home> {
       setState(() {
         debugPrint('Socket disconnected $msg');
         _remoteRenderer.srcObject = null;
-        socketStatus = false;
         joined = false;
         UserConnectionMsg = "Disconnected";
       });
@@ -125,19 +129,67 @@ class _HomeState extends State<Home> {
         debugPrint('otherPeerID: $otherPeerID');
       });
     });
+    socket!.on('test1', (msg) {
+      debugPrint('test1: $msg');
+      debugPrint(msg[2]);
+    });
     socket!.on('user joined', (msg) {
       setState(() {
         socketStatus = true;
-        // otherPeerID = pid;
+
+        otherPeerID = msg[1];
+        bool vOn = msg[2];
         debugPrint('joined1: $msg $peerID');
         // debugPrint(msg.runtimeType.toString());
         print(msg[0]);
         print(msg[1]);
         print(msg[2]);
-        connect(msg[1]);
+        socket!.emit('send peerid', {
+          "id": msg[0],
+          "peerID": peerID,
+        });
+        try {
+          connect(msg[1]);
+          joined = true;
+          UserConnectionMsg = "Connected";
+          // connectToNewUser(msg[0], theStream!);
+        } catch (e) {
+          debugPrint('Error: $e');
+          serverMsg("Media connection failed");
+          socket!.emit("message", {
+            "msg": "Media connection failed",
+            "servermsg": true,
+          });
+        }
+        serverMsg("Connected to stranger");
         joined = true;
-        UserConnectionMsg = "Connected";
+        waitingOnConnection = false;
+        if (!vOn) {
+          _remoteRenderer.srcObject = null;
+        }
+        otherUser = msg[0];
       });
+    });
+    socket!.on('message', (e) {
+      debugPrint('message: $e');
+      // if (e.servermsg) {
+      //   serverMsg(e.msg);
+      // } else {
+      //   strangerMsg(e.msg);
+      // }
+    });
+    socket!.on('other user', (event) {
+      debugPrint('other user: $event');
+      var ou = event[0];
+      videoOn = event[1] == 'true';
+      debugPrint('other user: $ou $videoOn');
+      joined = true;
+      waitingOnConnection = false;
+      serverMsg("Connected to stranger");
+      if (!videoOn) {
+        _remoteRenderer.srcObject = null;
+      }
+      otherUser = ou;
     });
   }
 
@@ -178,6 +230,16 @@ class _HomeState extends State<Home> {
     } catch (e) {
       debugPrint('join Room: $e');
     }
+  }
+
+  testButton() {
+    //pass multiple values to socket
+    socket!.emit('test', {
+      'peerID': peerID,
+      'video': video,
+      'audio': audio,
+      'otherPeerID': otherPeerID
+    });
   }
 
   _getUsersMedia(bool x, bool y) async {
@@ -233,6 +295,7 @@ class _HomeState extends State<Home> {
   }
 
   void connect(String peerid) async {
+    debugPrint('connectFunction: $peerid');
     final mediaStream = await navigator.mediaDevices
         .getUserMedia({"video": true, "audio": false});
 
@@ -316,6 +379,11 @@ class _HomeState extends State<Home> {
           children: [
             VideoRenderers(),
             ButtonSection(),
+            ElevatedButton(
+                onPressed: () {
+                  testButton();
+                },
+                child: const Text('test')),
             UserJoinStatus(),
             MessageSection(),
             MessageArea(),
