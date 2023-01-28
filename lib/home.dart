@@ -221,6 +221,8 @@ class _HomeState extends State<Home> {
         call.on('stream').listen((stream) {
           setState(() {
             _remoteRenderer.srcObject = stream;
+            // _localRenderer.srcObject = mediaStream;
+
             waitingOnConnection = false;
             joined = true;
             UserConnectionMsg = "Connected";
@@ -294,13 +296,11 @@ class _HomeState extends State<Home> {
     super.dispose();
   }
 
-  void connect(String peerid) async {
-    debugPrint('connectFunction: $peerid');
+  void connect() async {
     final mediaStream = await navigator.mediaDevices
         .getUserMedia({"video": true, "audio": false});
-
-    // final conn = peer.call(_msgController.text, mediaStream);
-    final conn = peer.call(peerid, mediaStream);
+    debugPrint('connect $peerID');
+    final conn = peer.call(peerID!, mediaStream);
 
     conn.on("close").listen((event) {
       setState(() {
@@ -490,7 +490,7 @@ class _HomeState extends State<Home> {
         ),
         ElevatedButton(
           onPressed: () async {
-            await joinRoom();
+            connect("2eb9a058-8854-4a61-91ae-69973935378a");
           },
           style: ElevatedButton.styleFrom(
             elevation: 0,
